@@ -1,6 +1,6 @@
 ---
 kind: DaemonSet
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 metadata:
   name: contiv-cleanup
   namespace: kube-system
@@ -15,11 +15,12 @@ spec:
       labels:
         k8s-app: contiv-cleanup
     spec:
+      priorityClassName: system-node-critical
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       hostPID: true
       tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
+        - operator: Exists
       serviceAccountName: contiv-netplugin
       containers:
       - name: contiv-ovs-cleanup
@@ -28,15 +29,15 @@ spec:
         securityContext:
           privileged: true
         volumeMounts:
-         - mountPath: /etc/openvswitch
-           name: etc-openvswitch
-           readOnly: false
-         - mountPath: /var/run
-           name: var-run
-           readOnly: false
-         - mountPath: /opt/cni/bin
-           name: cni-bin-dir
-           readOnly: false
+          - mountPath: /etc/openvswitch
+            name: etc-openvswitch
+            readOnly: false
+          - mountPath: /var/run
+            name: var-run
+            readOnly: false
+          - mountPath: /opt/cni/bin
+            name: cni-bin-dir
+            readOnly: false
         readinessProbe:
           exec:
             command:

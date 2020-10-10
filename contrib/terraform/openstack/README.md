@@ -1,12 +1,28 @@
-# Kubernetes on Openstack with Terraform
+# Kubernetes on OpenStack with Terraform
 
 Provision a Kubernetes cluster with [Terraform](https://www.terraform.io) on
-Openstack.
+OpenStack.
 
 ## Status
 
-This will install a Kubernetes cluster on an Openstack Cloud. It should work on
+This will install a Kubernetes cluster on an OpenStack Cloud. It should work on
 most modern installs of OpenStack that support the basic services.
+
+### Known compatible public clouds
+- [Auro](https://auro.io/)
+- [Betacloud](https://www.betacloud.io/)
+- [CityCloud](https://www.citycloud.com/)
+- [DreamHost](https://www.dreamhost.com/cloud/computing/)
+- [ELASTX](https://elastx.se/)
+- [EnterCloudSuite](https://www.entercloudsuite.com/)
+- [FugaCloud](https://fuga.cloud/)
+- [Open Telekom Cloud](https://cloud.telekom.de/) : requires to set the variable `wait_for_floatingip = "true"` in your cluster.tfvars
+- [OVH](https://www.ovh.com/)
+- [Rackspace](https://www.rackspace.com/)
+- [Ultimum](https://ultimum.io/)
+- [VexxHost](https://vexxhost.com/)
+- [Zetta](https://www.zetta.io/)
+
 
 ## Approach
 The terraform configuration inspects variables found in
@@ -22,6 +38,16 @@ hosts where that makes sense. You have the option of creating bastion hosts
 inside the private subnet to access the nodes there.  Alternatively, a node with
 a floating IP can be used as a jump host to nodes without.
 
+#### Using an existing router
+It is possible to use an existing router instead of creating one. To use an
+existing router set the router\_id variable to the uuid of the router you wish
+to use.
+
+For example:
+```
+router_id = "00c542e7-6f46-4535-ae95-984c7f0391a3"
+```
+
 ### Kubernetes Nodes
 You can create many different kubernetes topologies by setting the number of
 different classes of hosts. For each class there are options for allocating
@@ -34,8 +60,8 @@ floating IP addresses or not.
 Note that the Ansible script will report an invalid configuration if you wind up
 with an even number of etcd instances since that is not a valid configuration. This
 restriction includes standalone etcd nodes that are deployed in a cluster along with
-master nodes with etcd replicas. As an example, if you have three master nodes with 
-etcd replicas and three standalone etcd nodes, the script will fail since there are 
+master nodes with etcd replicas. As an example, if you have three master nodes with
+etcd replicas and three standalone etcd nodes, the script will fail since there are
 now six total etcd replicas.
 
 ### GlusterFS
@@ -46,14 +72,14 @@ specify:
 - Size of the non-ephemeral volumes to be attached to store the GlusterFS bricks
 - Other properties related to provisioning the hosts
 
-Even if you are using Container Linux by CoreOS for your cluster, you will still
+Even if you are using Flatcar Container Linux by Kinvolk for your cluster, you will still
 need the GlusterFS VMs to be based on either Debian or RedHat based images.
-Container Linux by CoreOS cannot serve GlusterFS, but can connect to it through
+Flatcar Container Linux by Kinvolk cannot serve GlusterFS, but can connect to it through
 binaries available on hyperkube v1.4.3_coreos.0 or higher.
 
 ## Requirements
 
-- [Install Terraform](https://www.terraform.io/intro/getting-started/install.html)
+- [Install Terraform](https://www.terraform.io/intro/getting-started/install.html) 0.12 or later
 - [Install Ansible](http://docs.ansible.com/ansible/latest/intro_installation.html)
 - you already have a suitable OS image in Glance
 - you already have a floating IP pool created
@@ -92,6 +118,7 @@ Create an inventory directory for your cluster by copying the existing sample an
 $ cp -LRp contrib/terraform/openstack/sample-inventory inventory/$CLUSTER
 $ cd inventory/$CLUSTER
 $ ln -s ../../contrib/terraform/openstack/hosts
+$ ln -s ../../contrib
 ```
 
 This will be the base for subsequent Terraform commands.
@@ -99,8 +126,8 @@ This will be the base for subsequent Terraform commands.
 #### OpenStack access and credentials
 
 No provider variables are hardcoded inside `variables.tf` because Terraform
-supports various authentication methods for OpenStack: the older script and 
-environment method (using `openrc`) as well as a newer declarative method, and 
+supports various authentication methods for OpenStack: the older script and
+environment method (using `openrc`) as well as a newer declarative method, and
 different OpenStack environments may support Identity API version 2 or 3.
 
 These are examples and may vary depending on your OpenStack cloud provider,
@@ -202,16 +229,18 @@ set OS_PROJECT_DOMAIN_NAME=Default
 The construction of the cluster is driven by values found in
 [variables.tf](variables.tf).
 
-For your cluster, edit `inventory/$CLUSTER/cluster.tf`.
+For your cluster, edit `inventory/$CLUSTER/cluster.tfvars`.
 
 |Variable | Description |
 |---------|-------------|
 |`cluster_name` | All OpenStack resources will use the Terraform variable`cluster_name` (default`example`) in their name to make it easier to track. For example the first compute resource will be named`example-kubernetes-1`. |
+|`az_list` | List of Availability Zones available in your OpenStack cluster. |
 |`network_name` | The name to be given to the internal network that will be generated |
+|`network_dns_domain` | (Optional) The dns_domain for the internal network that will be generated |
 |`dns_nameservers`| An array of DNS name server names to be used by hosts in the internal subnet. |
 |`floatingip_pool` | Name of the pool from which floating IPs will be allocated |
 |`external_net` | UUID of the external network that will be routed to |
-|`flavor_k8s_master`,`flavor_k8s_node`,`flavor_etcd`, `flavor_bastion`,`flavor_gfs_node` | Flavor depends on your openstack installation, you can get available flavor IDs through`nova flavor-list` |
+|`flavor_k8s_master`,`flavor_k8s_node`,`flavor_etcd`, `flavor_bastion`,`flavor_gfs_node` | Flavor depends on your openstack installation, you can get available flavor IDs through `openstack flavor list` |
 |`image`,`image_gfs` | Name of the image to use in provisioning the compute resources. Should already be loaded into glance. |
 |`ssh_user`,`ssh_user_gfs` | The username to ssh into the image with. This usually depends on the image you have selected |
 |`public_key_path` | Path on your local workstation to the public key file you wish to use in creating the key pairs |
@@ -224,6 +253,119 @@ For your cluster, edit `inventory/$CLUSTER/cluster.tf`.
 | `gfs_volume_size_in_gb` | Size of the non-ephemeral volumes to be attached to store the GlusterFS bricks |
 |`supplementary_master_groups` | To add ansible groups to the masters, such as `kube-node` for tainting them as nodes, empty by default. |
 |`supplementary_node_groups` | To add ansible groups to the nodes, such as `kube-ingress` for running ingress controller pods, empty by default. |
+|`bastion_allowed_remote_ips` | List of CIDR allowed to initiate a SSH connection, `["0.0.0.0/0"]` by default |
+|`master_allowed_remote_ips` | List of CIDR blocks allowed to initiate an API connection, `["0.0.0.0/0"]` by default |
+|`k8s_allowed_remote_ips` | List of CIDR allowed to initiate a SSH connection, empty by default |
+|`worker_allowed_ports` | List of ports to open on worker nodes, `[{ "protocol" = "tcp", "port_range_min" = 30000, "port_range_max" = 32767, "remote_ip_prefix" = "0.0.0.0/0"}]` by default |
+|`wait_for_floatingip` | Let Terraform poll the instance until the floating IP has been associated, `false` by default. |
+|`node_root_volume_size_in_gb` | Size of the root volume for nodes, 0 to use ephemeral storage |
+|`master_root_volume_size_in_gb` | Size of the root volume for masters, 0 to use ephemeral storage |
+|`gfs_root_volume_size_in_gb` | Size of the root volume for gluster, 0 to use ephemeral storage |
+|`etcd_root_volume_size_in_gb` | Size of the root volume for etcd nodes, 0 to use ephemeral storage |
+|`bastion_root_volume_size_in_gb` | Size of the root volume for bastions, 0 to use ephemeral storage |
+|`use_server_group` | Create and use openstack nova servergroups, default: false |
+|`use_access_ip` | If 1, nodes with floating IPs will transmit internal cluster traffic via floating IPs; if 0 private IPs will be used instead. Default value is 1. |
+|`k8s_nodes` | Map containing worker node definition, see explanation below |
+
+##### k8s_nodes
+Allows a custom defintion of worker nodes giving the operator full control over individual node flavor and
+availability zone placement. To enable the use of this mode set the `number_of_k8s_nodes` and
+`number_of_k8s_nodes_no_floating_ip` variables to 0. Then define your desired worker node configuration
+using the `k8s_nodes` variable.
+
+For example:
+```
+k8s_nodes = {
+  "1" = {
+    "az" = "sto1"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  },
+  "2" = {
+    "az" = "sto2"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  },
+  "3" = {
+    "az" = "sto3"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  }
+}
+```
+
+Would result in the same configuration as:
+```
+number_of_k8s_nodes = 3
+flavor_k8s_node = "83d8b44a-26a0-4f02-a981-079446926445"
+az_list = ["sto1", "sto2", "sto3"]
+```
+
+And:
+```
+k8s_nodes = {
+  "ing-1" = {
+    "az" = "sto1"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  },
+  "ing-2" = {
+    "az" = "sto2"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  },
+  "ing-3" = {
+    "az" = "sto3"
+    "flavor" = "83d8b44a-26a0-4f02-a981-079446926445"
+    "floating_ip" = true
+  },
+  "big-1" = {
+    "az" = "sto1"
+    "flavor" = "3f73fc93-ec61-4808-88df-2580d94c1a9b"
+    "floating_ip" = false
+  },
+  "big-2" = {
+    "az" = "sto2"
+    "flavor" = "3f73fc93-ec61-4808-88df-2580d94c1a9b"
+    "floating_ip" = false
+  },
+  "big-3" = {
+    "az" = "sto3"
+    "flavor" = "3f73fc93-ec61-4808-88df-2580d94c1a9b"
+    "floating_ip" = false
+  },
+  "small-1" = {
+    "az" = "sto1"
+    "flavor" = "7a6a998f-ac7f-4fb8-a534-2175b254f75e"
+    "floating_ip" = false
+  },
+  "small-2" = {
+    "az" = "sto2"
+    "flavor" = "7a6a998f-ac7f-4fb8-a534-2175b254f75e"
+    "floating_ip" = false
+  },
+  "small-3" = {
+    "az" = "sto3"
+    "flavor" = "7a6a998f-ac7f-4fb8-a534-2175b254f75e"
+    "floating_ip" = false
+  }
+}
+```
+
+Would result in three nodes in each availability zone each with their own separate naming,
+flavor and floating ip configuration.
+
+The "schema":
+```
+k8s_nodes = {
+  "key | node name suffix, must be unique" = {
+    "az" = string
+    "flavor" = string
+    "floating_ip" = bool
+  },
+}
+```
+All values are required.
 
 #### Terraform state files
 
@@ -254,12 +396,12 @@ This should finish fairly quickly telling you Terraform has successfully initial
 You can apply the Terraform configuration to your cluster with the following command
 issued from your cluster's inventory directory (`inventory/$CLUSTER`):
 ```ShellSession
-$ terraform apply -var-file=cluster.tf ../../contrib/terraform/openstack
+$ terraform apply -var-file=cluster.tfvars ../../contrib/terraform/openstack
 ```
 
 if you chose to create a bastion host, this script will create
 `contrib/terraform/openstack/k8s-cluster.yml` with an ssh command for Ansible to
-be able to access your machines tunneling  through the bastion's IP address. If
+be able to access your machines tunneling through the bastion's IP address. If
 you want to manually handle the ssh tunneling to these machines, please delete
 or move that file. If you want to use this, just leave it there, as ansible will
 pick it up automatically.
@@ -268,7 +410,7 @@ pick it up automatically.
 You can destroy your new cluster with the following command issued from the cluster's inventory directory:
 
 ```ShellSession
-$ terraform destroy -var-file=cluster.tf ../../contrib/terraform/openstack
+$ terraform destroy -var-file=cluster.tfvars ../../contrib/terraform/openstack
 ```
 
 If you've started the Ansible run, it may also be a good idea to do some manual cleanup:
@@ -303,6 +445,30 @@ $ ssh-add ~/.ssh/id_rsa
 
 If you have deployed and destroyed a previous iteration of your cluster, you will need to clear out any stale keys from your SSH "known hosts" file ( `~/.ssh/known_hosts`).
 
+#### Metadata variables
+
+The [python script](../terraform.py) that reads the
+generated`.tfstate` file to generate a dynamic inventory recognizes
+some variables within a "metadata" block, defined in a "resource"
+block (example):
+
+```
+resource "openstack_compute_instance_v2" "example" {
+    ...
+    metadata {
+        ssh_user = "ubuntu"
+        prefer_ipv6 = true
+	python_bin = "/usr/bin/python3"
+    }
+    ...
+}
+```
+
+As the example shows, these let you define the SSH username for
+Ansible, a Python binary which is needed by Ansible if
+`/usr/bin/python` doesn't exist, and whether the IPv6 address of the
+instance should be preferred over IPv4.
+
 #### Bastion host
 
 Bastion access will be determined by:
@@ -317,7 +483,7 @@ So, either a bastion host, or at least master/node with a floating IP are requir
 
 #### Test access
 
-Make sure you can connect to the hosts.  Note that Container Linux by CoreOS will have a state `FAILED` due to Python not being present.  This is okay, because Python will be installed during bootstrapping, so long as the hosts are not `UNREACHABLE`.
+Make sure you can connect to the hosts.  Note that Flatcar Container Linux by Kinvolk will have a state `FAILED` due to Python not being present.  This is okay, because Python will be installed during bootstrapping, so long as the hosts are not `UNREACHABLE`.
 
 ```
 $ ansible -i inventory/$CLUSTER/hosts -m ping all
@@ -339,25 +505,20 @@ If it fails try to connect manually via SSH.  It could be something as simple as
 
 ### Configure cluster variables
 
-Edit `inventory/$CLUSTER/group_vars/all.yml`:
-- Set variable **bootstrap_os** appropriately for your desired image:
-```
-# Valid bootstrap options (required): ubuntu, coreos, centos, none
-bootstrap_os: coreos
-```
+Edit `inventory/$CLUSTER/group_vars/all/all.yml`:
 - **bin_dir**:
 ```
 # Directory where the binaries will be installed
 # Default:
 # bin_dir: /usr/local/bin
-# For Container Linux by CoreOS:
+# For Flatcar Container Linux by Kinvolk:
 bin_dir: /opt/bin
 ```
 - and **cloud_provider**:
 ```
 cloud_provider: openstack
 ```
-Edit `inventory/$CLUSTER/group_vars/k8s-cluster.yml`:
+Edit `inventory/$CLUSTER/group_vars/k8s-cluster/k8s-cluster.yml`:
 - Set variable **kube_network_plugin** to your desired networking plugin.
   - **flannel** works out-of-the-box
   - **calico** requires [configuring OpenStack Neutron ports](/docs/openstack.md) to allow service and pod subnets
@@ -371,8 +532,12 @@ kube_network_plugin: flannel
 # Can be docker_dns, host_resolvconf or none
 # Default:
 # resolvconf_mode: docker_dns
-# For Container Linux by CoreOS:
+# For Flatcar Container Linux by Kinvolk:
 resolvconf_mode: host_resolvconf
+```
+- Set max amount of attached cinder volume per host (default 256)
+```
+node_volume_attach_limit: 26
 ```
 
 ### Deploy Kubernetes
@@ -401,8 +566,8 @@ ssh [os-user]@[master-ip] sudo ls /etc/kubernetes/ssl/
 ```
 4. Get `admin`'s certificates and keys:
 ```
-ssh [os-user]@[master-ip] sudo cat /etc/kubernetes/ssl/admin-[cluster_name]-k8s-master-1-key.pem > admin-key.pem
-ssh [os-user]@[master-ip] sudo cat /etc/kubernetes/ssl/admin-[cluster_name]-k8s-master-1.pem > admin.pem
+ssh [os-user]@[master-ip] sudo cat /etc/kubernetes/ssl/admin-kube-master-1-key.pem > admin-key.pem
+ssh [os-user]@[master-ip] sudo cat /etc/kubernetes/ssl/admin-kube-master-1.pem > admin.pem
 ssh [os-user]@[master-ip] sudo cat /etc/kubernetes/ssl/ca.pem > ca.pem
 ```
 5. Configure kubectl:
@@ -423,14 +588,6 @@ $ kubectl config use-context default-system
 kubectl version
 ```
 
-If you are using floating ip addresses then you may get this error:
-```
-Unable to connect to the server: x509: certificate is valid for 10.0.0.6, 10.0.0.6, 10.233.0.1, 127.0.0.1, not 132.249.238.25
-```
-
-You can tell kubectl to ignore this condition by adding the
-`--insecure-skip-tls-verify` option.
-
 ## GlusterFS
 GlusterFS is not deployed by the standard`cluster.yml` playbook, see the
 [GlusterFS playbook documentation](../../network-storage/glusterfs/README.md)
@@ -445,3 +602,81 @@ $ ansible-playbook --become -i inventory/$CLUSTER/hosts ./contrib/network-storag
 ## What's next
 
 Try out your new Kubernetes cluster with the [Hello Kubernetes service](https://kubernetes.io/docs/tasks/access-application-cluster/service-access-application-cluster/).
+
+## Appendix
+
+### Migration from `number_of_k8s_nodes*` to `k8s_nodes`
+If you currently have a cluster defined using the `number_of_k8s_nodes*` variables and wish
+to migrate to the `k8s_nodes` style you can do it like so:
+
+```ShellSession
+$ terraform state list
+module.compute.data.openstack_images_image_v2.gfs_image
+module.compute.data.openstack_images_image_v2.vm_image
+module.compute.openstack_compute_floatingip_associate_v2.k8s_master[0]
+module.compute.openstack_compute_floatingip_associate_v2.k8s_node[0]
+module.compute.openstack_compute_floatingip_associate_v2.k8s_node[1]
+module.compute.openstack_compute_floatingip_associate_v2.k8s_node[2]
+module.compute.openstack_compute_instance_v2.k8s_master[0]
+module.compute.openstack_compute_instance_v2.k8s_node[0]
+module.compute.openstack_compute_instance_v2.k8s_node[1]
+module.compute.openstack_compute_instance_v2.k8s_node[2]
+module.compute.openstack_compute_keypair_v2.k8s
+module.compute.openstack_compute_servergroup_v2.k8s_etcd[0]
+module.compute.openstack_compute_servergroup_v2.k8s_master[0]
+module.compute.openstack_compute_servergroup_v2.k8s_node[0]
+module.compute.openstack_networking_secgroup_rule_v2.bastion[0]
+module.compute.openstack_networking_secgroup_rule_v2.egress[0]
+module.compute.openstack_networking_secgroup_rule_v2.k8s
+module.compute.openstack_networking_secgroup_rule_v2.k8s_allowed_remote_ips[0]
+module.compute.openstack_networking_secgroup_rule_v2.k8s_allowed_remote_ips[1]
+module.compute.openstack_networking_secgroup_rule_v2.k8s_allowed_remote_ips[2]
+module.compute.openstack_networking_secgroup_rule_v2.k8s_master[0]
+module.compute.openstack_networking_secgroup_rule_v2.worker[0]
+module.compute.openstack_networking_secgroup_rule_v2.worker[1]
+module.compute.openstack_networking_secgroup_rule_v2.worker[2]
+module.compute.openstack_networking_secgroup_rule_v2.worker[3]
+module.compute.openstack_networking_secgroup_rule_v2.worker[4]
+module.compute.openstack_networking_secgroup_v2.bastion[0]
+module.compute.openstack_networking_secgroup_v2.k8s
+module.compute.openstack_networking_secgroup_v2.k8s_master
+module.compute.openstack_networking_secgroup_v2.worker
+module.ips.null_resource.dummy_dependency
+module.ips.openstack_networking_floatingip_v2.k8s_master[0]
+module.ips.openstack_networking_floatingip_v2.k8s_node[0]
+module.ips.openstack_networking_floatingip_v2.k8s_node[1]
+module.ips.openstack_networking_floatingip_v2.k8s_node[2]
+module.network.openstack_networking_network_v2.k8s[0]
+module.network.openstack_networking_router_interface_v2.k8s[0]
+module.network.openstack_networking_router_v2.k8s[0]
+module.network.openstack_networking_subnet_v2.k8s[0]
+$ terraform state mv 'module.compute.openstack_compute_floatingip_associate_v2.k8s_node[0]' 'module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes["1"]'
+Move "module.compute.openstack_compute_floatingip_associate_v2.k8s_node[0]" to "module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes[\"1\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.compute.openstack_compute_floatingip_associate_v2.k8s_node[1]' 'module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes["2"]'
+Move "module.compute.openstack_compute_floatingip_associate_v2.k8s_node[1]" to "module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes[\"2\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.compute.openstack_compute_floatingip_associate_v2.k8s_node[2]' 'module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes["3"]'
+Move "module.compute.openstack_compute_floatingip_associate_v2.k8s_node[2]" to "module.compute.openstack_compute_floatingip_associate_v2.k8s_nodes[\"3\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.compute.openstack_compute_instance_v2.k8s_node[0]' 'module.compute.openstack_compute_instance_v2.k8s_node["1"]'
+Move "module.compute.openstack_compute_instance_v2.k8s_node[0]" to "module.compute.openstack_compute_instance_v2.k8s_node[\"1\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.compute.openstack_compute_instance_v2.k8s_node[1]' 'module.compute.openstack_compute_instance_v2.k8s_node["2"]'
+Move "module.compute.openstack_compute_instance_v2.k8s_node[1]" to "module.compute.openstack_compute_instance_v2.k8s_node[\"2\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.compute.openstack_compute_instance_v2.k8s_node[2]' 'module.compute.openstack_compute_instance_v2.k8s_node["3"]'
+Move "module.compute.openstack_compute_instance_v2.k8s_node[2]" to "module.compute.openstack_compute_instance_v2.k8s_node[\"3\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.ips.openstack_networking_floatingip_v2.k8s_node[0]' 'module.ips.openstack_networking_floatingip_v2.k8s_node["1"]'
+Move "module.ips.openstack_networking_floatingip_v2.k8s_node[0]" to "module.ips.openstack_networking_floatingip_v2.k8s_node[\"1\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.ips.openstack_networking_floatingip_v2.k8s_node[1]' 'module.ips.openstack_networking_floatingip_v2.k8s_node["2"]'
+Move "module.ips.openstack_networking_floatingip_v2.k8s_node[1]" to "module.ips.openstack_networking_floatingip_v2.k8s_node[\"2\"]"
+Successfully moved 1 object(s).
+$ terraform state mv 'module.ips.openstack_networking_floatingip_v2.k8s_node[2]' 'module.ips.openstack_networking_floatingip_v2.k8s_node["3"]'
+Move "module.ips.openstack_networking_floatingip_v2.k8s_node[2]" to "module.ips.openstack_networking_floatingip_v2.k8s_node[\"3\"]"
+Successfully moved 1 object(s).
+```
+
+Of course for nodes without floating ips those steps can be omitted.

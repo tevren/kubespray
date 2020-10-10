@@ -1,5 +1,4 @@
 ---
-
 - name: reset | include file with pre-reset tasks specific to the network_plugin if exists
   include_tasks: "{{ (role_path + '/../network_plugin/' + kube_network_plugin + '/tasks/pre-reset.yml') | realpath  }}"
   when:
@@ -14,8 +13,6 @@
   with_items:
     - kubelet
     - vault
-    - etcd
-    - etcd-events
   failed_when: false
   tags:
     - services
@@ -26,8 +23,6 @@
     state: absent
   with_items:
     - kubelet
-    - etcd
-    - etcd-events
     - vault
     - calico-node
   register: services_removed
@@ -46,48 +41,121 @@
   tags:
     - docker
 
-- name: reset | systemctl daemon-reload
-  command: systemctl daemon-reload
+- name: reset | systemctl daemon-reload  # noqa 503
+  systemd:
+    daemon_reload: true
   when: services_removed.changed or docker_dropins_removed.changed
 
 - name: reset | remove all containers
-  shell: "{{ docker_bin_dir }}/docker ps -aq | xargs -r docker rm -fv"
+  shell: "set -o pipefail && {{ docker_bin_dir }}/docker ps -aq | xargs -r docker rm -fv"
+  args:
+    executable: /bin/bash
   register: remove_all_containers
   retries: 4
   until: remove_all_containers.rc == 0
   delay: 5
+  when: container_manager == "docker"
   tags:
     - docker
 
-- name: reset | restart docker if needed
+- name: reset | restart docker if needed  # noqa 503
   service:
     name: docker
     state: restarted
-  when: docker_dropins_removed.changed
+  when: docker_dropins_removed.changed and container_manager == "docker"
   tags:
     - docker
 
-- name: reset | remove all cri-o containers
-  shell: "crictl ps -aq | xargs -r crictl rm"
-  register: remove_all_crio_containers
-  retries: 4
-  until: remove_all_crio_containers.rc == 0
+- name: reset | stop all cri containers
+  shell: "set -o pipefail && crictl ps -aq | xargs -r crictl -t 60s stop"
+  args:
+    executable: /bin/bash
+  register: remove_all_cri_containers
+  retries: 5
+  until: remove_all_cri_containers.rc == 0
   delay: 5
   tags:
     - crio
-  when: container_manager == 'crio'
+    - containerd
+  when: container_manager in ["crio", "containerd"]
 
-- name: reset | gather mounted kubelet dirs
-  shell: mount | grep /var/lib/kubelet/ | awk '{print $3}' | tac
+- name: reset | remove all cri containers
+  shell: "set -o pipefail && crictl ps -aq | xargs -r crictl -t 60s rm"
+  args:
+    executable: /bin/bash
+  register: remove_all_cri_containers
+  retries: 5
+  until: remove_all_cri_containers.rc == 0
+  delay: 5
+  tags:
+    - crio
+    - containerd
+  when: container_manager in ["crio", "containerd"] and deploy_container_engine|default(true)
+
+- name: reset | stop all cri pods
+  shell: "set -o pipefail && crictl pods -q | xargs -r crictl -t 60s stopp"
+  args:
+    executable: /bin/bash
+  register: remove_all_cri_containers
+  retries: 5
+  until: remove_all_cri_containers.rc == 0
+  delay: 5
+  tags:
+    - crio
+    - containerd
+  when: container_manager in ["crio", "containerd"]
+
+- name: reset | remove all cri pods
+  shell: "set -o pipefail && crictl pods -q | xargs -r crictl -t 60s rmp"
+  args:
+    executable: /bin/bash
+  register: remove_all_cri_containers
+  retries: 5
+  until: remove_all_cri_containers.rc == 0
+  delay: 5
+  tags:
+    - crio
+    - containerd
+  when: container_manager in ["crio", "containerd"]
+
+- name: reset | stop etcd services
+  service:
+    name: "{{ item }}"
+    state: stopped
+  with_items:
+    - etcd
+    - etcd-events
+  failed_when: false
+  tags:
+    - services
+
+- name: reset | remove etcd services
+  file:
+    path: "/etc/systemd/system/{{ item }}.service"
+    state: absent
+  with_items:
+    - etcd
+    - etcd-events
+  register: services_removed
+  tags:
+    - services
+
+- name: reset | gather mounted kubelet dirs  # noqa 301
+  shell: set -o pipefail && mount | grep /var/lib/kubelet/ | awk '{print $3}' | tac
+  args:
+    executable: /bin/bash
+    warn: false
   check_mode: no
   register: mounted_dirs
+  failed_when: false
   tags:
     - mounts
 
-- name: reset | unmount kubelet dirs
-  command: umount {{item}}
-  with_items: '{{ mounted_dirs.stdout_lines }}'
+- name: reset | unmount kubelet dirs  # noqa 301
+  command: umount -f {{ item }}
+  with_items: "{{ mounted_dirs.stdout_lines }}"
   register: umount_dir
+  when: mounted_dirs
   retries: 4
   until: umount_dir.rc == 0
   delay: 5
@@ -101,25 +169,53 @@
   with_items:
     - filter
     - nat
+    - mangle
   when: flush_iptables|bool
   tags:
     - iptables
+
+- name: Clear IPVS virtual server table
+  command: "ipvsadm -C"
+  when:
+    - kube_proxy_mode == 'ipvs' and inventory_hostname in groups['k8s-cluster']
+
+- name: reset | check kube-ipvs0 network device
+  stat:
+    path: /sys/class/net/kube-ipvs0
+  register: kube_ipvs0
+
+- name: reset | Remove kube-ipvs0
+  command: "ip link del kube-ipvs0"
+  when:
+    - kube_proxy_mode == 'ipvs'
+    - kube_ipvs0.stat.exists
+
+- name: reset | check nodelocaldns network device
+  stat:
+    path: /sys/class/net/nodelocaldns
+  register: nodelocaldns_device
+
+- name: reset | Remove nodelocaldns
+  command: "ip link del nodelocaldns"
+  when:
+    - enable_nodelocaldns|default(false)|bool
+    - nodelocaldns_device.stat.exists
 
 - name: reset | delete some files and directories
   file:
     path: "{{ item }}"
     state: absent
   with_items:
-    - "{{kube_config_dir}}"
+    - "{{ kube_config_dir }}"
     - /var/lib/kubelet
-    - /root/.kube
-    - /root/.helm
+    - "{{ ansible_env.HOME | default('/root') }}/.kube"
+    - "{{ ansible_env.HOME | default('/root') }}/.helm"
     - "{{ etcd_data_dir }}"
-    - /var/lib/etcd-events
-    - /etc/ssl/etcd
+    - "{{ etcd_events_data_dir }}"
+    - "{{ etcd_config_dir }}"
     - /var/log/calico
     - /etc/cni
-    - /etc/nginx
+    - "{{ nginx_config_dir }}"
     - /etc/dnsmasq.d
     - /etc/dnsmasq.conf
     - /etc/dnsmasq.d-available
@@ -151,11 +247,14 @@
     - "{{ bin_dir }}/kubernetes-scripts"
     - "{{ bin_dir }}/kubectl"
     - "{{ bin_dir }}/kubeadm"
+    - "{{ bin_dir }}/hyperkube"
     - "{{ bin_dir }}/helm"
     - "{{ bin_dir }}/calicoctl"
+    - "{{ bin_dir }}/calicoctl.sh"
     - "{{ bin_dir }}/calico-upgrade"
     - "{{ bin_dir }}/weave"
-    - /var/lib/rkt
+    - "{{ bin_dir }}/crictl"
+    - "{{ bin_dir }}/netctl"
     - /var/lib/cni
     - /etc/vault
     - /etc/contiv
@@ -163,15 +262,18 @@
     - /run/contiv
     - /etc/openvswitch
     - /run/openvswitch
+    - /var/lib/kube-router
+    - /var/lib/calico
+    - /etc/cilium
+    - /run/calico
   ignore_errors: yes
   tags:
     - files
 
 - name: reset | remove dns settings from dhclient.conf
   blockinfile:
-    dest: "{{ item }}"
+    path: "{{ item }}"
     state: absent
-    follow: yes
     marker: "# Ansible entries {mark}"
   failed_when: false
   with_items:
@@ -183,9 +285,8 @@
 
 - name: reset | remove host entries from /etc/hosts
   blockinfile:
-    dest: "/etc/hosts"
+    path: "/etc/hosts"
     state: absent
-    follow: yes
     marker: "# Ansible inventory hosts {mark}"
   tags:
     - files
@@ -194,7 +295,7 @@
 - name: reset | include file with reset tasks specific to the network_plugin if exists
   include_tasks: "{{ (role_path + '/../network_plugin/' + kube_network_plugin + '/tasks/reset.yml') | realpath  }}"
   when:
-    - kube_network_plugin in ['flannel', 'cilium', 'contiv']
+    - kube_network_plugin in ['flannel', 'cilium', 'contiv', 'kube-router', 'calico']
   tags:
     - network
 
@@ -202,12 +303,20 @@
   service:
     name: >-
       {% if ansible_os_family == "RedHat" -%}
+      {%- if ansible_distribution_major_version|int == 8 -%}
+      NetworkManager
+      {%- else -%}
       network
+      {%- endif -%}
+      {%- elif ansible_distribution == "Ubuntu" and ansible_distribution_release in ["bionic", "focal"] -%}
+      systemd-networkd
       {%- elif ansible_os_family == "Debian" -%}
       networking
       {%- endif %}
     state: restarted
-  when: ansible_os_family not in ["CoreOS", "Container Linux by CoreOS"] and reset_restart_network
+  when:
+    - ansible_os_family not in ["Flatcar Container Linux by Kinvolk"]
+    - reset_restart_network
   tags:
     - services
     - network

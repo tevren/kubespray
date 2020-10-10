@@ -3,9 +3,15 @@ variable "cluster_name" {
 }
 
 variable "az_list" {
-  description = "List of Availability Zones available in your OpenStack cluster"
-  type = "list"
-  default = ["nova"]
+  description = "List of Availability Zones to use for masters in your OpenStack cluster"
+  type        = list(string)
+  default     = ["nova"]
+}
+
+variable "az_list_node" {
+  description = "List of Availability Zones to use for nodes in your OpenStack cluster"
+  type        = list(string)
+  default     = ["nova"]
 }
 
 variable "number_of_bastions" {
@@ -44,8 +50,32 @@ variable "number_of_gfs_nodes_no_floating_ip" {
   default = 0
 }
 
+variable "bastion_root_volume_size_in_gb" {
+  default = 0
+}
+
+variable "etcd_root_volume_size_in_gb" {
+  default = 0
+}
+
+variable "master_root_volume_size_in_gb" {
+  default = 0
+}
+
+variable "node_root_volume_size_in_gb" {
+  default = 0
+}
+
+variable "gfs_root_volume_size_in_gb" {
+  default = 0
+}
+
 variable "gfs_volume_size_in_gb" {
   default = 75
+}
+
+variable "master_volume_type" {
+  default = "Default"
 }
 
 variable "public_key_path" {
@@ -55,12 +85,12 @@ variable "public_key_path" {
 
 variable "image" {
   description = "the image to use"
-  default     = "ubuntu-14.04"
+  default     = ""
 }
 
 variable "image_gfs" {
   description = "Glance image to use for GlusterFS"
-  default     = "ubuntu-16.04"
+  default     = ""
 }
 
 variable "ssh_user" {
@@ -74,27 +104,27 @@ variable "ssh_user_gfs" {
 }
 
 variable "flavor_bastion" {
-  description = "Use 'nova flavor-list' command to see what your OpenStack instance uses for IDs"
+  description = "Use 'openstack flavor list' command to see what your OpenStack instance uses for IDs"
   default     = 3
 }
 
 variable "flavor_k8s_master" {
-  description = "Use 'nova flavor-list' command to see what your OpenStack instance uses for IDs"
+  description = "Use 'openstack flavor list' command to see what your OpenStack instance uses for IDs"
   default     = 3
 }
 
 variable "flavor_k8s_node" {
-  description = "Use 'nova flavor-list' command to see what your OpenStack instance uses for IDs"
+  description = "Use 'openstack flavor list' command to see what your OpenStack instance uses for IDs"
   default     = 3
 }
 
 variable "flavor_etcd" {
-  description = "Use 'nova flavor-list' command to see what your OpenStack instance uses for IDs"
+  description = "Use 'openstack flavor list' command to see what your OpenStack instance uses for IDs"
   default     = 3
 }
 
 variable "flavor_gfs_node" {
-  description = "Use 'nova flavor-list' command to see what your OpenStack instance uses for IDs"
+  description = "Use 'openstack flavor list' command to see what your OpenStack instance uses for IDs"
   default     = 3
 }
 
@@ -103,15 +133,26 @@ variable "network_name" {
   default     = "internal"
 }
 
+variable "network_dns_domain" {
+  description = "dns_domain for the internal network"
+  type        = string
+  default     = null
+}
+
+variable "use_neutron" {
+  description = "Use neutron"
+  default     = 1
+}
+
 variable "subnet_cidr" {
   description = "Subnet CIDR block."
-  type = "string"
-  default = "10.0.0.0/24"
+  type        = string
+  default     = "10.0.0.0/24"
 }
 
 variable "dns_nameservers" {
   description = "An array of DNS name server names used by hosts in this subnet."
-  type        = "list"
+  type        = list
   default     = []
 }
 
@@ -120,16 +161,82 @@ variable "floatingip_pool" {
   default     = "external"
 }
 
+variable "wait_for_floatingip" {
+  description = "Terraform will poll the instance until the floating IP has been associated."
+  default     = "false"
+}
+
 variable "external_net" {
   description = "uuid of the external/public network"
 }
 
 variable "supplementary_master_groups" {
   description = "supplementary kubespray ansible groups for masters, such kube-node"
-  default = ""
+  default     = ""
 }
 
 variable "supplementary_node_groups" {
   description = "supplementary kubespray ansible groups for worker nodes, such as kube-ingress"
-  default = ""
+  default     = ""
 }
+
+variable "bastion_allowed_remote_ips" {
+  description = "An array of CIDRs allowed to SSH to hosts"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "master_allowed_remote_ips" {
+  description = "An array of CIDRs allowed to access API of masters"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "k8s_allowed_remote_ips" {
+  description = "An array of CIDRs allowed to SSH to hosts"
+  type        = list(string)
+  default     = []
+}
+
+variable "k8s_allowed_egress_ips" {
+  description = "An array of CIDRs allowed for egress traffic"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "master_allowed_ports" {
+  type = list
+
+  default = []
+}
+
+variable "worker_allowed_ports" {
+  type = list
+
+  default = [
+    {
+      "protocol"         = "tcp"
+      "port_range_min"   = 30000
+      "port_range_max"   = 32767
+      "remote_ip_prefix" = "0.0.0.0/0"
+    },
+  ]
+}
+
+variable "use_access_ip" {
+  default = 1
+}
+
+variable "use_server_groups" {
+  default = false
+}
+
+variable "router_id" {
+  description = "uuid of an externally defined router to use"
+  default     = null
+}
+
+variable "k8s_nodes" {
+  default = {}
+}
+

@@ -1,50 +1,86 @@
 ---
-- hosts: localhost
+- name: Check ansible version
+  import_playbook: ansible_version.yml
+
+- hosts: all
+  gather_facts: false
+  tags: always
+  tasks:
+    - name: "Set up proxy environment"
+      set_fact:
+        proxy_env:
+          http_proxy: "{{ http_proxy | default ('') }}"
+          HTTP_PROXY: "{{ http_proxy | default ('') }}"
+          https_proxy: "{{ https_proxy | default ('') }}"
+          HTTPS_PROXY: "{{ https_proxy | default ('') }}"
+          no_proxy: "{{ no_proxy | default ('') }}"
+          NO_PROXY: "{{ no_proxy | default ('') }}"
+      no_log: true
+
+- hosts: bastion[0]
   gather_facts: False
   roles:
-    - { role: kubespray-defaults}
-    - { role: bastion-ssh-config, tags: ["localhost", "bastion"]}
+    - { role: kubespray-defaults }
+    - { role: bastion-ssh-config, tags: ["localhost", "bastion"] }
 
-##Bootstrap any new workers
-- hosts: kube-node
+- name: Bootstrap any new workers
+  hosts: kube-node
+  strategy: linear
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
   gather_facts: false
-  vars:
-    ansible_ssh_pipelining: false
   roles:
-    - { role: kubespray-defaults}
-    - { role: bootstrap-os, tags: bootstrap-os}
+    - { role: kubespray-defaults }
+    - { role: bootstrap-os, tags: bootstrap-os }
 
-##We still have to gather facts about our masters and etcd nodes
-- hosts: k8s-cluster:etcd:calico-rr
-  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
-  vars:
-    ansible_ssh_pipelining: true
-  gather_facts: true
+- name: Gather facts
+  tags: always
+  import_playbook: facts.yml
 
-##We need to genereate the etcd certificates beforhand
-- hosts: etcd
+- name: Generate the etcd certificates beforehand
+  hosts: etcd
+  gather_facts: False
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
   roles:
-  - { role: kubespray-defaults}
-  - { role: etcd, tags: etcd, etcd_cluster_setup: false }
-
-##Target only workers to get kubelet installed and checking in on any new nodes
-- hosts: kube-node
-  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
-  roles:
-    - { role: kubespray-defaults}
-    - { role: kubernetes/preinstall, tags: preinstall }
-
-    - { role: docker, tags: docker, when: container_manager == 'docker' }
-    - { role: cri-o, tags: crio, when: container_manager == 'crio' }
-    - role: rkt
-      tags: rkt
-      when: "'rkt' in [etcd_deployment_type, kubelet_deployment_type, vault_deployment_type]"
-    - { role: download, tags: download, when: "not skip_downloads" }
+    - { role: kubespray-defaults }
     - { role: etcd, tags: etcd, etcd_cluster_setup: false }
-    - { role: vault, tags: vault, when: "cert_management == 'vault'"}
+
+- name: Download images to ansible host cache via first kube-master node
+  hosts: kube-master[0]
+  gather_facts: False
+  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
+  roles:
+    - { role: kubespray-defaults, when: "not skip_downloads and download_run_once and not download_localhost" }
+    - { role: kubernetes/preinstall, tags: preinstall, when: "not skip_downloads and download_run_once and not download_localhost" }
+    - { role: download, tags: download, when: "not skip_downloads and download_run_once and not download_localhost" }
+
+- name: Target only workers to get kubelet installed and checking in on any new nodes(engine)
+  hosts: kube-node
+  gather_facts: False
+  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
+  roles:
+    - { role: kubespray-defaults }
+    - { role: kubernetes/preinstall, tags: preinstall }
+    - { role: container-engine, tags: "container-engine", when: deploy_container_engine|default(true) }
+    - { role: download, tags: download, when: "not skip_downloads" }
+    - { role: etcd, tags: etcd, etcd_cluster_setup: false, when: "not etcd_kubeadm_enabled|default(false)" }
+  environment: "{{ proxy_env }}"
+
+- name: Target only workers to get kubelet installed and checking in on any new nodes(node)
+  hosts: kube-node
+  gather_facts: False
+  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
+  roles:
+    - { role: kubespray-defaults }
     - { role: kubernetes/node, tags: node }
-    - { role: kubernetes/kubeadm, tags: kubeadm, when: "kubeadm_enabled" }
+  environment: "{{ proxy_env }}"
+
+- name: Target only workers to get kubelet installed and checking in on any new nodes(network)
+  hosts: kube-node
+  gather_facts: False
+  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
+  roles:
+    - { role: kubespray-defaults }
+    - { role: kubernetes/kubeadm, tags: kubeadm }
     - { role: network_plugin, tags: network }
-  environment: "{{proxy_env}}"
+    - { role: kubernetes/node-label, tags: node-label }
+  environment: "{{ proxy_env }}"

@@ -1,52 +1,51 @@
 ---
-- set_fact:
-    architecture_groups:
-      x86_64: amd64
-      aarch64: arm64
-
-- name: ansible_architecture_rename
-  set_fact:
-    host_architecture: >-
-      {%- if ansible_architecture in architecture_groups -%}
-      {{architecture_groups[ansible_architecture]}}
-      {%- else -%}
-       {{ansible_architecture}}
-      {% endif %}
-
-- name: Force binaries directory for Container Linux by CoreOS
+- name: Force binaries directory for Flatcar Container Linux by Kinvolk
   set_fact:
     bin_dir: "/opt/bin"
-  when: ansible_os_family in ["CoreOS", "Container Linux by CoreOS"]
+  when: ansible_os_family in ["Flatcar Container Linux by Kinvolk"]
   tags:
     - facts
 
-- name: check if atomic host
+- name: check if booted with ostree
   stat:
     path: /run/ostree-booted
   register: ostree
 
-- set_fact:
-    is_atomic: "{{ ostree.stat.exists }}"
+- name: set is_fedora_coreos
+  lineinfile:
+    path: /etc/os-release
+    line: "VARIANT_ID=coreos"
+    state: present
+  check_mode: yes
+  register: os_variant_coreos
+  changed_when: false
 
-- set_fact:
-    kube_cert_group: "kube"
-  when: is_atomic
+- name: set is_fedora_coreos
+  set_fact:
+    is_fedora_coreos: "{{ ostree.stat.exists and os_variant_coreos is not changed }}"
 
 - name: check resolvconf
-  shell: which resolvconf
+  command: which resolvconf
   register: resolvconf
   failed_when: false
   changed_when: false
   check_mode: no
 
-- set_fact:
+- name: check systemd-resolved
+  # noqa 303 Should we use service_facts for this?
+  command: systemctl is-active systemd-resolved
+  register: systemd_resolved_enabled
+  failed_when: false
+  changed_when: false
+  check_mode: no
+
+- name: set dns facts
+  set_fact:
     resolvconf: >-
       {%- if resolvconf.rc == 0 -%}true{%- else -%}false{%- endif -%}
-
-- set_fact:
     bogus_domains: |-
       {% for d in [ 'default.svc.' + dns_domain, 'svc.' + dns_domain ] + searchdomains|default([]) -%}
-      {{dns_domain}}.{{d}}./{{d}}.{{d}}./com.{{d}}./
+      {{ dns_domain }}.{{ d }}./{{ d }}.{{ d }}./com.{{ d }}./
       {%- endfor %}
     cloud_resolver: >-
       {%- if cloud_provider is defined and cloud_provider == 'gce' -%}
@@ -75,12 +74,12 @@
       {%- if resolvconf|bool -%}/etc/resolvconf/resolv.conf.d/base{%- endif -%}
     head: >-
       {%- if resolvconf|bool -%}/etc/resolvconf/resolv.conf.d/head{%- endif -%}
-  when: not ansible_os_family in ["CoreOS", "Container Linux by CoreOS"]
+  when: not ansible_os_family in ["Flatcar Container Linux by Kinvolk"] and not is_fedora_coreos
 
-- name: target temporary resolvconf cloud init file (Container Linux by CoreOS)
+- name: target temporary resolvconf cloud init file (Flatcar Container Linux by Kinvolk / Fedora CoreOS)
   set_fact:
     resolvconffile: /tmp/resolveconf_cloud_init_conf
-  when: ansible_os_family in ["CoreOS", "Container Linux by CoreOS"]
+  when: ansible_os_family in ["Flatcar Container Linux by Kinvolk"] or is_fedora_coreos
 
 - name: check if /etc/dhclient.conf exists
   stat:
@@ -123,27 +122,25 @@
     supersede_domain:
       supersede domain-name "{{ dns_domain }}";
 
-- name: pick dnsmasq cluster IP or default resolver
+- name: pick coredns cluster IP or default resolver
   set_fact:
-    dnsmasq_server: |-
-      {%- if dns_mode in ['kubedns', 'coredns'] and not dns_early|bool -%}
-        {{ [ skydns_server ] + upstream_dns_servers|default([]) }}
+    coredns_server: |-
+      {%- if dns_mode == 'coredns' and not dns_early|bool -%}
+        {{ [ skydns_server ] }}
       {%- elif dns_mode == 'coredns_dual' and not dns_early|bool -%}
-        {{ [ skydns_server ] + [ skydns_server_secondary ] + upstream_dns_servers|default([]) }}
+        {{ [ skydns_server ] + [ skydns_server_secondary ] }}
       {%- elif dns_mode == 'manual' and not dns_early|bool -%}
-        {{ ( manual_dns_server.split(',') | list) + upstream_dns_servers|default([]) }}
+        {{ ( manual_dns_server.split(',') | list) }}
       {%- elif dns_early|bool -%}
         {{ upstream_dns_servers|default([]) }}
-      {%- else -%}
-        {{ [ dnsmasq_dns_server ] }}
       {%- endif -%}
 
 - name: generate nameservers to resolvconf
   set_fact:
     nameserverentries:
-      nameserver {{( dnsmasq_server + nameservers|d([]) + cloud_resolver|d([])) | join(',nameserver ')}}
+      nameserver {{ ( coredns_server + nameservers|d([]) + cloud_resolver|d([])) | unique | join(',nameserver ') }}
     supersede_nameserver:
-      supersede domain-name-servers {{( dnsmasq_server + nameservers|d([]) + cloud_resolver|d([])) | join(', ') }};
+      supersede domain-name-servers {{ ( coredns_server + nameservers|d([]) + cloud_resolver|d([])) | unique | join(', ') }};
 
 - name: gather os specific variables
   include_vars: "{{ item }}"
@@ -158,3 +155,22 @@
       paths:
         - ../vars
       skip: true
+
+- name: set etcd vars if using kubeadm mode
+  set_fact:
+    etcd_cert_dir: "{{ kube_cert_dir }}"
+    kube_etcd_cacert_file: "etcd/ca.crt"
+    kube_etcd_cert_file: "apiserver-etcd-client.crt"
+    kube_etcd_key_file: "apiserver-etcd-client.key"
+  when:
+    - etcd_kubeadm_enabled
+
+- name: check /usr readonly
+  stat:
+    path: "/usr"
+  register: usr
+
+- name: set alternate flexvolume path
+  set_fact:
+    kubelet_flexvolumes_plugins_dir: /var/lib/kubelet/volumeplugins
+  when: not usr.stat.writeable

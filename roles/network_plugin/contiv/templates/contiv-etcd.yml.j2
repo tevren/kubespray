@@ -1,6 +1,6 @@
 ---
 kind: DaemonSet
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 metadata:
   name: contiv-etcd
   namespace: kube-system
@@ -14,20 +14,19 @@ spec:
     metadata:
       labels:
         k8s-app: contiv-etcd
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      priorityClassName: system-node-critical
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       hostPID: true
       nodeSelector:
-        node-role.kubernetes.io/master: "true"
+        node-role.kubernetes.io/master: ""
       tolerations:
-        - key: node-role.kubernetes.io/master
-          effect: NoSchedule
+        - operator: Exists
       initContainers:
         - name: contiv-etcd-init
           image: {{ contiv_etcd_init_image_repo }}:{{ contiv_etcd_init_image_tag }}
-          imagePullPolicy: Always
+          imagePullPolicy: {{ k8s_image_pull_policy }}
           env:
             - name: ETCD_INIT_ARGSFILE
               value: '{{ contiv_etcd_conf_dir }}/contiv-etcd-args'

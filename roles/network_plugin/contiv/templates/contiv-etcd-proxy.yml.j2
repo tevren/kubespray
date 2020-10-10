@@ -1,6 +1,6 @@
 ---
 kind: DaemonSet
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 metadata:
   name: contiv-etcd-proxy
   namespace: kube-system
@@ -14,13 +14,18 @@ spec:
     metadata:
       labels:
         k8s-app: contiv-etcd-proxy
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      priorityClassName: system-node-critical
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       hostPID: true
-      nodeSelector:
-        node-role.kubernetes.io/node: "true"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: DoesNotExist
       containers:
         - name: contiv-etcd-proxy
           image: {{ contiv_etcd_image_repo }}:{{ contiv_etcd_image_tag }}

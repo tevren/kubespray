@@ -1,6 +1,6 @@
 ---
 kind: DaemonSet
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 metadata:
   name: canal-node
   namespace: kube-system
@@ -12,17 +12,15 @@ spec:
       k8s-app: canal-node
   template:
     metadata:
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
       labels:
         k8s-app: canal-node
     spec:
+      priorityClassName: system-node-critical
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: canal
       tolerations:
-        - effect: NoSchedule
-          operator: Exists
+        - operator: Exists
       volumes:
         # Used by calico/node.
         - name: lib-modules
@@ -55,6 +53,30 @@ spec:
           hostPath:
             path: /run/xtables.lock
             type: FileOrCreate
+      initContainers:
+        # This container installs the Calico CNI binaries
+        # and CNI network config file on each node.
+        - name: install-cni
+          image: {{ calico_cni_image_repo }}:{{ calico_cni_image_tag }}
+          command: ["/opt/cni/bin/install"]
+          env:
+            # Name of the CNI config file to create.
+            - name: CNI_CONF_NAME
+              value: "10-canal.conflist"
+            # Install CNI binaries
+            - name: UPDATE_CNI_BINARIES
+              value: "true"
+            # The CNI network config to install on each node.
+            - name: CNI_NETWORK_CONFIG_FILE
+              value: "/host/etc/cni/net.d/canal.conflist.template"
+            # Prevents the container from sleeping forever.
+            - name: SLEEP
+              value: "false"
+          volumeMounts:
+            - mountPath: /host/etc/cni/net.d
+              name: cni-net-dir
+            - mountPath: /host/opt/cni/bin
+              name: cni-bin-dir
       containers:
         # Runs the flannel daemon to enable vxlan networking between
         # container hosts.
@@ -171,6 +193,9 @@ spec:
                   fieldPath: spec.nodeName
             - name: FELIX_HEALTHENABLED
               value: "true"
+            # Disable IPv6 on Kubernetes.
+            - name: FELIX_IPV6SUPPORT
+              value: "false"
             # Etcd SSL vars
             - name: ETCD_CA_CERT_FILE
               valueFrom:
@@ -195,15 +220,17 @@ spec:
             privileged: true
           livenessProbe:
             httpGet:
+              host: 127.0.0.1
               path: /liveness
               port: 9099
             periodSeconds: 10
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             failureThreshold: 6
           readinessProbe:
-            httpGet:
-              path: /readiness
-              port: 9099
+            exec:
+              command:
+              - /bin/calico-node
+              - -felix-ready
             periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
@@ -218,6 +245,9 @@ spec:
             - name: "canal-certs"
               mountPath: "{{ canal_cert_dir }}"
               readOnly: true
+            - name: xtables-lock
+              mountPath: /run/xtables.lock
+              readOnly: false
   updateStrategy:
     rollingUpdate:
       maxUnavailable: {{ serial | default('20%') }}

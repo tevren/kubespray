@@ -4,14 +4,13 @@ kind: PodSecurityPolicy
 metadata:
   name: local-volume-provisioner
   annotations:
-    seccomp.security.alpha.kubernetes.io/defaultProfileName:  'docker/default'
-    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default'
+    seccomp.security.alpha.kubernetes.io/defaultProfileName:  'runtime/default'
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'runtime/default'
 {% if apparmor_enabled %}
     apparmor.security.beta.kubernetes.io/defaultProfileName:  'runtime/default'
     apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
 {% endif %}
   labels:
-    kubernetes.io/cluster-service: 'true'
     addonmanager.kubernetes.io/mode: Reconcile
 spec:
   privileged: true
@@ -25,8 +24,10 @@ spec:
     - 'downwardAPI'
     - 'hostPath'
   allowedHostPaths:
-    - pathPrefix: "{{ local_volume_provisioner_base_dir }}"
+{% for class_name, class_config in local_volume_provisioner_storage_classes.items() %}
+    - pathPrefix: "{{ class_config.host_dir }}"
       readOnly: false
+{% endfor %}
   hostNetwork: false
   hostIPC: false
   hostPID: false

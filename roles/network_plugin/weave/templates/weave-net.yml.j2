@@ -9,7 +9,7 @@ items:
       labels:
         name: weave-net
       namespace: kube-system
-  - apiVersion: rbac.authorization.k8s.io/v1beta1
+  - apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
       name: weave-net
@@ -49,7 +49,7 @@ items:
           - podsecuritypolicies
         verbs:
           - use
-  - apiVersion: rbac.authorization.k8s.io/v1beta1
+  - apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
       name: weave-net
@@ -63,7 +63,7 @@ items:
       - kind: ServiceAccount
         name: weave-net
         namespace: kube-system
-  - apiVersion: rbac.authorization.k8s.io/v1beta1
+  - apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
     metadata:
       name: weave-net
@@ -86,7 +86,7 @@ items:
           - configmaps
         verbs:
           - create
-  - apiVersion: rbac.authorization.k8s.io/v1beta1
+  - apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
       name: weave-net
@@ -101,7 +101,7 @@ items:
       - kind: ServiceAccount
         name: weave-net
         namespace: kube-system
-  - apiVersion: extensions/v1beta1
+  - apiVersion: apps/v1
     kind: DaemonSet
     metadata:
       name: weave-net
@@ -110,11 +110,15 @@ items:
       namespace: kube-system
     spec:
       minReadySeconds: 5
+      selector:
+        matchLabels:
+          name: weave-net
       template:
         metadata:
           labels:
             name: weave-net
         spec:
+          priorityClassName: system-node-critical
           containers:
             - name: weave
               command:
@@ -135,7 +139,7 @@ items:
                 - name: CONN_LIMIT
                   value: "{{ weave_conn_limit | int }}"
                 - name: HAIRPIN_MODE
-                  value: "{{ weave_hairpin_mode | bool }}"
+                  value: "{{ weave_hairpin_mode | bool | lower }}"
                 - name: IPALLOC_RANGE
                   value: "{{ weave_ipalloc_range }}"
                 - name: EXPECT_NPC
@@ -160,6 +164,10 @@ items:
                 - name: WEAVE_STATUS_ADDR
                   value: "{{ weave_status_addr }}"
 {% endif %}
+{% if weave_iptables_backend %}
+                - name: IPTABLES_BACKEND
+                  value: "{{ weave_iptables_backend }}"
+{% endif %}
                 - name: WEAVE_MTU
                   value: "{{ weave_mtu | int }}"
                 - name: NO_MASQ_LOCAL
@@ -170,15 +178,14 @@ items:
 {% endif %}
               image: {{ weave_kube_image_repo }}:{{ weave_kube_image_tag }}
               imagePullPolicy: {{ k8s_image_pull_policy }}
-              livenessProbe:
+              readinessProbe:
                 httpGet:
                   host: 127.0.0.1
                   path: /status
                   port: 6784
-                initialDelaySeconds: 30
               resources:
                 requests:
-                  cpu: 10m
+                  cpu: 50m
               securityContext:
                 privileged: true
               volumeMounts:
@@ -196,8 +203,8 @@ items:
                   mountPath: /lib/modules
                 - name: xtables-lock
                   mountPath: /run/xtables.lock
+                  readOnly: false
             - name: weave-npc
-              args: []
               env:
                 - name: HOSTNAME
                   valueFrom:
@@ -208,21 +215,22 @@ items:
               imagePullPolicy: {{ k8s_image_pull_policy }}
               resources:
                 requests:
-                  cpu: 10m
+                  cpu: 50m
               securityContext:
                 privileged: true
               volumeMounts:
                 - name: xtables-lock
                   mountPath: /run/xtables.lock
+                  readOnly: false
           hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
           hostPID: true
           restartPolicy: Always
           securityContext:
             seLinuxOptions: {}
           serviceAccountName: weave-net
           tolerations:
-            - effect: NoSchedule
-              operator: Exists
+            - operator: Exists
           volumes:
             - name: weavedb
               hostPath:

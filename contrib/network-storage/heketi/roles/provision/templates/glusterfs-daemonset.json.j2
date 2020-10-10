@@ -1,6 +1,6 @@
 {
     "kind": "DaemonSet",
-    "apiVersion": "extensions/v1beta1",
+    "apiVersion": "apps/v1",
     "metadata": {
         "name": "glusterfs",
         "labels": {
@@ -12,6 +12,11 @@
         }
     },
     "spec": {
+        "selector": {
+            "matchLabels": {
+                "glusterfs-node": "daemonset"
+            }
+        },
         "template": {
             "metadata": {
                 "name": "glusterfs",
@@ -69,7 +74,7 @@
                         },
                         "readinessProbe": {
                             "timeoutSeconds": 3,
-                            "initialDelaySeconds": 60,
+                            "initialDelaySeconds": 3,
                             "exec": {
                                 "command": [
                                     "/bin/bash",
@@ -80,7 +85,7 @@
                         },
                         "livenessProbe": {
                             "timeoutSeconds": 3,
-                            "initialDelaySeconds": 60,
+                            "initialDelaySeconds": 10,
                             "exec": {
                                 "command": [
                                     "/bin/bash",

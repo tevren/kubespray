@@ -2,6 +2,9 @@
 set -e
 
 BINDIR="/opt/bin"
+PYPY_VERSION=7.3.2
+PYPI_URL="https://downloads.python.org/pypy/pypy3.6-v${PYPY_VERSION}-linux64.tar.bz2"
+PYPI_HASH=f67cf1664a336a3e939b58b3cabfe47d893356bdc01f2e17bc912aaa6605db12
 
 mkdir -p $BINDIR
 
@@ -11,25 +14,13 @@ if [[ -e $BINDIR/.bootstrapped ]]; then
   exit 0
 fi
 
-PYPY_VERSION=5.1.0
+TAR_FILE=pyp.tar.bz2
+wget -O "${TAR_FILE}" "${PYPI_URL}"
+echo "${PYPI_HASH} ${TAR_FILE}" | sha256sum -c -
+tar -xjf "${TAR_FILE}" && rm "${TAR_FILE}"
+mv -n "pypy3.6-v${PYPY_VERSION}-linux64" pypy3
 
-wget -O - https://bitbucket.org/pypy/pypy/downloads/pypy-$PYPY_VERSION-linux64.tar.bz2 |tar -xjf -
-mv -n pypy-$PYPY_VERSION-linux64 pypy
-
-## library fixup
-mkdir -p pypy/lib
-if [ -f /lib64/libncurses.so.5.9 ]; then
-  ln -snf /lib64/libncurses.so.5.9 $BINDIR/pypy/lib/libtinfo.so.5
-elif [ -f /lib64/libncurses.so.6.1 ]; then
-  ln -snf /lib64/libncurses.so.6.1 $BINDIR/pypy/lib/libtinfo.so.5
-fi
-
-cat > $BINDIR/python <<EOF
-#!/bin/bash
-LD_LIBRARY_PATH=$BINDIR/pypy/lib:$LD_LIBRARY_PATH exec $BINDIR/pypy/bin/pypy "\$@"
-EOF
-
-chmod +x $BINDIR/python
+ln -s ./pypy3/bin/pypy3 python
 $BINDIR/python --version
 
 touch $BINDIR/.bootstrapped
